@@ -14,6 +14,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; overscroll-behavior: none; }
@@ -35,6 +36,7 @@ const { useState, useEffect, useRef } = React;
 const API_KEY = 'METS_TA_CLE_ICI';
 
 const STORAGE_KEY = 'ironlog-v3';
+const CUSTOM_EX_KEY = 'ironlog-custom-exercises';
 
 const PRESET_EXERCISES = [
   'Bench Press','Squat','Deadlift','Overhead Press',
@@ -111,14 +113,14 @@ function getPR(sessions, name, excludeId=null) {
 }
 
 // Calcule le statut de fatigue de chaque muscle (rouge/jaune/vert)
-function computeFatigue(sessions) {
+function computeFatigue(sessions, customExercises={}) {
   const lastWorked = {}; // muscle → timestamp ms
   const now = Date.now();
 
   sessions.forEach(s => {
     const ts = new Date(s.date).getTime();
     s.exercises.forEach(ex => {
-      const muscles = MUSCLE_MAP[ex.name] || [];
+      const muscles = MUSCLE_MAP[ex.name] || customExercises[ex.name] || [];
       muscles.forEach(m => {
         if (!lastWorked[m] || ts > lastWorked[m]) lastWorked[m] = ts;
       });
@@ -371,7 +373,10 @@ function App() {
   const [metric,     setMetric]     = useState('maxWeight');
   const [confirmDel, setConfirmDel] = useState(null);
   const [newPRs,     setNewPRs]     = useState([]);
-  const [bodyFace,   setBodyFace]   = useState('front'); // front | back
+  const [bodyFace,   setBodyFace]   = useState('front');
+  const [customExercises, setCustomExercises] = useState({}); // { name: [muscles] }
+  const [muscleModal, setMuscleModal] = useState(null); // nom exercice en attente de muscles
+  const [selectedMuscles, setSelectedMuscles] = useState([]);
   const inputRef = useRef(null);
 
   useEffect(() => {
@@ -380,6 +385,10 @@ function App() {
       if (raw) setSessions(JSON.parse(raw));
       else { setSessions(DEMO); localStorage.setItem(STORAGE_KEY,JSON.stringify(DEMO)); }
     } catch { setSessions(DEMO); }
+    try {
+      const rawCustom = localStorage.getItem(CUSTOM_EX_KEY);
+      if (rawCustom) setCustomExercises(JSON.parse(rawCustom));
+    } catch {}
   }, []);
 
   const save = updated => {
@@ -409,12 +418,29 @@ function App() {
     showToast('Séance supprimée');
   };
 
-  const addExercise = name => {
+  const addExercise = (name, skipMuscleCheck=false) => {
     if (!name.trim()) return;
+    const isPreset = PRESET_EXERCISES.includes(name.trim());
+    const isKnownCustom = customExercises[name.trim()];
+    // Si exercice inconnu → demander les muscles
+    if (!isPreset && !isKnownCustom && !skipMuscleCheck) {
+      setMuscleModal(name.trim());
+      setSelectedMuscles([]);
+      setShowPicker(false);
+      return;
+    }
     const updated = { ...cur, exercises:[...cur.exercises,{name:name.trim(),sets:[]}] };
     setCur(updated);
     setOpenEx(updated.exercises.length-1);
-    setExName(''); setShowPicker(false);
+    setExName(''); setShowPicker(false); setMuscleModal(null);
+  };
+
+  const confirmCustomExercise = () => {
+    if (!muscleModal) return;
+    const updated = { ...customExercises, [muscleModal]: selectedMuscles };
+    setCustomExercises(updated);
+    try { localStorage.setItem(CUSTOM_EX_KEY, JSON.stringify(updated)); } catch {}
+    addExercise(muscleModal, true);
   };
 
   const removeExercise = i => {
@@ -470,6 +496,98 @@ function App() {
     },[]);
   };
 
+  const generatePDF = () => {
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      const today = new Date();
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay() + 1);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+
+      const weekSessions = sessions.filter(s => {
+        const d = new Date(s.date);
+        return d >= weekStart && d <= weekEnd;
+      });
+
+      // Header
+      doc.setFillColor(14, 14, 14);
+      doc.rect(0, 0, 210, 30, 'F');
+      doc.setTextColor(232, 249, 74);
+      doc.setFontSize(22);
+      doc.setFont('helvetica', 'bold');
+      doc.text('IRONLOG — Workout de la semaine', 14, 18);
+
+      doc.setTextColor(150, 150, 150);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'normal');
+      const dateRange = `${weekStart.toLocaleDateString('fr-FR')} → ${weekEnd.toLocaleDateString('fr-FR')}`;
+      doc.text(dateRange, 14, 26);
+
+      let y = 40;
+
+      if (weekSessions.length === 0) {
+        doc.setTextColor(100, 100, 100);
+        doc.setFontSize(13);
+        doc.text('Aucune séance cette semaine.', 14, y);
+      } else {
+        weekSessions.forEach((s, si) => {
+          // Séance header
+          doc.setFillColor(26, 26, 26);
+          doc.rect(10, y - 5, 190, 12, 'F');
+          doc.setTextColor(232, 249, 74);
+          doc.setFontSize(13);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`📅 ${fmtL(s.date)}`, 14, y + 3);
+          y += 14;
+
+          s.exercises.forEach(ex => {
+            doc.setTextColor(200, 200, 200);
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            doc.text(`• ${ex.name}`, 16, y);
+            y += 7;
+
+            ex.sets.forEach((set, si) => {
+              doc.setTextColor(140, 140, 140);
+              doc.setFontSize(10);
+              doc.setFont('helvetica', 'normal');
+              doc.text(`    Série ${si+1} : ${set.weight} kg × ${set.reps} reps`, 18, y);
+              y += 6;
+            });
+
+            // Volume total
+            const totalVol = vol(ex);
+            doc.setTextColor(100, 180, 100);
+            doc.setFontSize(9);
+            doc.text(`    Volume total : ${totalVol} kg`, 18, y);
+            y += 8;
+
+            if (y > 270) { doc.addPage(); y = 20; }
+          });
+          y += 6;
+        });
+
+        // Résumé
+        if (y > 240) { doc.addPage(); y = 20; }
+        doc.setFillColor(14, 32, 0);
+        doc.rect(10, y, 190, 20, 'F');
+        doc.setTextColor(232, 249, 74);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        const totalSets = weekSessions.reduce((a,s)=>a+s.exercises.reduce((b,e)=>b+e.sets.length,0),0);
+        const totalVolume = weekSessions.reduce((a,s)=>a+s.exercises.reduce((b,e)=>b+vol(e),0),0);
+        doc.text(`Résumé : ${weekSessions.length} séances · ${totalSets} séries · ${totalVolume} kg de volume total`, 14, y + 13);
+      }
+
+      doc.save(`ironlog-semaine-${weekStart.toISOString().split('T')[0]}.pdf`);
+      showToast('PDF téléchargé 📄');
+    } catch(e) {
+      showToast('Erreur PDF — réessaie');
+    }
+  };
+
   const getAI = async exIdx => {
     const ex = cur.exercises[exIdx];
     const last = getLastSession(ex.name);
@@ -494,7 +612,7 @@ Conseil COURT max 3 lignes, poids+reps exacts, format "➜ [conseil]", motivant.
 
   // ── CORPS (Fatigue Map) ────────────────────────────────────────────────────
   if (view==='corps') {
-    const { status, lastWorked } = computeFatigue(sessions);
+    const { status, lastWorked } = computeFatigue(sessions, customExercises);
     const statusLabels = { fatigue:'🔴 Fatigué', recup:'🟡 En récup', ok:'🟢 Récupéré' };
     const hoursAgo = m => lastWorked[m] ? Math.round((Date.now()-lastWorked[m])/3600000) : null;
 
@@ -670,11 +788,53 @@ Conseil COURT max 3 lignes, poids+reps exacts, format "➜ [conseil]", motivant.
             );
           })}
 
-          {!showPicker ? (
+          {!showPicker && !muscleModal ? (
             <button style={S.btnO} onClick={()=>setShowPicker(true)}>+ Ajouter un exercice</button>
+          ) : muscleModal ? (
+            // ── Modal sélection muscles ──
+            <div style={{...S.card,padding:16,borderColor:'#2a3a00'}}>
+              <div style={{fontSize:14,color:'#e8f94a',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:4}}>
+                💪 {muscleModal}
+              </div>
+              <div style={{fontSize:12,color:'#666',marginBottom:14}}>Quels muscles cet exercice cible ?</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:16}}>
+                {Object.entries(MUSCLE_LABELS).map(([key,label])=>{
+                  const selected = selectedMuscles.includes(key);
+                  return (
+                    <button key={key}
+                      onClick={()=>setSelectedMuscles(prev=>selected?prev.filter(m=>m!==key):[...prev,key])}
+                      style={{background:selected?'#1a2000':'#1a1a1a',color:selected?'#e8f94a':'#888',border:`1px solid ${selected?'#e8f94a':'#2a2a2a'}`,borderRadius:4,padding:'7px 12px',fontSize:13,cursor:'pointer',fontWeight:selected?700:400}}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={confirmCustomExercise}
+                  style={{...S.btnG,flex:1,color:'#e8f94a',borderColor:'#e8f94a',padding:'10px 0',fontWeight:700,fontSize:14,textTransform:'uppercase'}}>
+                  ✓ Confirmer
+                </button>
+                <button onClick={()=>{setMuscleModal(null);setShowPicker(true);}} style={S.btnG}>✕ Retour</button>
+              </div>
+            </div>
           ) : (
             <div style={{...S.card,padding:16}}>
               <div style={{fontSize:13,color:'#666',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:12}}>Choisir un exercice</div>
+              {/* Exercices custom sauvegardés */}
+              {Object.keys(customExercises).length > 0 && (
+                <>
+                  <div style={{fontSize:11,color:'#e8f94a',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8}}>Mes exercices</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:14}}>
+                    {Object.keys(customExercises).map(n=>(
+                      <button key={n} onClick={()=>addExercise(n,true)}
+                        style={{background:'#1a2000',border:'1px solid #2a3a00',color:'#e8f94a',borderRadius:4,padding:'7px 12px',fontSize:13,cursor:'pointer',fontWeight:600}}>
+                        ⭐ {n}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{fontSize:11,color:'#444',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8}}>Exercices prédéfinis</div>
+                </>
+              )}
               <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:14}}>
                 {PRESET_EXERCISES.map(n=>(
                   <button key={n} onClick={()=>addExercise(n)}
@@ -683,8 +843,9 @@ Conseil COURT max 3 lignes, poids+reps exacts, format "➜ [conseil]", motivant.
                   </button>
                 ))}
               </div>
+              <div style={{fontSize:11,color:'#555',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:8}}>Nouvel exercice</div>
               <div style={{display:'flex',gap:8}}>
-                <input ref={inputRef} style={{...S.inp,flex:1}} placeholder="Autre exercice..."
+                <input ref={inputRef} style={{...S.inp,flex:1}} placeholder="ex: Fly Cable, Hip Thrust..."
                   value={exName} onChange={e=>setExName(e.target.value)}
                   onKeyDown={e=>e.key==='Enter'&&addExercise(exName)}/>
                 <button onClick={()=>addExercise(exName)} style={{...S.btnG,color:'#e8f94a',borderColor:'#e8f94a',padding:'8px 16px'}}>OK</button>
@@ -790,7 +951,7 @@ Conseil COURT max 3 lignes, poids+reps exacts, format "➜ [conseil]", motivant.
 
   // ── HOME ───────────────────────────────────────────────────────────────────
   if (view==='home') {
-    const { status } = computeFatigue(sessions);
+    const { status } = computeFatigue(sessions, customExercises);
     const fatiguedCount = Object.values(status).filter(s=>s==='fatigue').length;
     const okCount       = Object.values(status).filter(s=>s==='ok').length;
     return (
@@ -865,6 +1026,10 @@ Conseil COURT max 3 lignes, poids+reps exacts, format "➜ [conseil]", motivant.
     <div style={S.app}>
       <div style={S.hdr}>
         <div><div style={S.logo}>Historique</div><div style={S.sub}>{sessions.length} séance{sessions.length!==1?'s':''}</div></div>
+        <button onClick={generatePDF}
+          style={{background:'#1a2000',border:'1px solid #2a3a00',borderRadius:6,color:'#e8f94a',fontFamily:'inherit',fontWeight:700,fontSize:12,padding:'8px 14px',cursor:'pointer',letterSpacing:'0.08em',textTransform:'uppercase'}}>
+          📄 PDF semaine
+        </button>
       </div>
       <div style={S.sec}>
         {sessions.length===0 ? (
