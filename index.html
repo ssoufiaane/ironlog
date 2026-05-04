@@ -2,19 +2,37 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
+
+  <!-- ✅ FIX IMPORTANT POUR GITHUB PAGES -->
+  <base href="/ironlog/">
+
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0a0a0a">
+
+  <!-- iOS PWA -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="IronLog">
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+  <!-- Manifest -->
+  <link rel="manifest" href="./manifest.json">
+
+  <!-- Icons -->
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+
   <title>IronLog</title>
+
+  <!-- Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- React -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- PDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; overscroll-behavior: none; }
@@ -27,12 +45,14 @@
     * { scrollbar-width: none; }
   </style>
 </head>
+
 <body>
 <div id="root"></div>
+
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-// ⚠️ REMPLACE avec ta clé API Anthropic (console.anthropic.com)
+// ⚠️ API KEY (inchangée)
 const API_KEY = 'METS_TA_CLE_ICI';
 
 const STORAGE_KEY = 'ironlog-v3';
@@ -44,36 +64,27 @@ const PRESET_EXERCISES = [
   'Triceps Pushdown','Leg Press','Leg Curl','Lat Pulldown'
 ];
 
-// Mapping exercice → muscles travaillés
 const MUSCLE_MAP = {
-  'Bench Press':       ['pectoraux','triceps','epaules'],
-  'Squat':             ['quadriceps','fessiers','ischio'],
-  'Deadlift':          ['ischio','fessiers','dos','lombaires'],
-  'Overhead Press':    ['epaules','triceps','trapezes'],
-  'Barbell Row':       ['dos','biceps','trapezes'],
-  'Pull-up':           ['dos','biceps'],
-  'Dips':              ['pectoraux','triceps'],
-  'Curl Biceps':       ['biceps'],
-  'Triceps Pushdown':  ['triceps'],
-  'Leg Press':         ['quadriceps','fessiers'],
-  'Leg Curl':          ['ischio'],
-  'Lat Pulldown':      ['dos','biceps'],
+  'Bench Press': ['pectoraux','triceps','epaules'],
+  'Squat': ['quadriceps','fessiers','ischio'],
+  'Deadlift': ['ischio','fessiers','dos','lombaires'],
+  'Overhead Press': ['epaules','triceps','trapezes'],
+  'Barbell Row': ['dos','biceps','trapezes'],
+  'Pull-up': ['dos','biceps'],
+  'Dips': ['pectoraux','triceps'],
+  'Curl Biceps': ['biceps'],
+  'Triceps Pushdown': ['triceps'],
+  'Leg Press': ['quadriceps','fessiers'],
+  'Leg Curl': ['ischio'],
+  'Lat Pulldown': ['dos','biceps'],
 };
 
 const MUSCLE_LABELS = {
-  pectoraux:   'Pectoraux',
-  triceps:     'Triceps',
-  epaules:     'Épaules',
-  biceps:      'Biceps',
-  dos:         'Dos / Dorsaux',
-  trapezes:    'Trapèzes',
-  lombaires:   'Lombaires',
-  quadriceps:  'Quadriceps',
-  fessiers:    'Fessiers',
-  ischio:      'Ischio-jambiers',
-  mollets:     'Mollets',
+  pectoraux:'Pectoraux', triceps:'Triceps', epaules:'Épaules',
+  biceps:'Biceps', dos:'Dos / Dorsaux', trapezes:'Trapèzes',
+  lombaires:'Lombaires', quadriceps:'Quadriceps',
+  fessiers:'Fessiers', ischio:'Ischio-jambiers', mollets:'Mollets',
 };
-
 const DEMO = [
   { id:1, date:'2026-03-15', exercises:[
     { name:'Bench Press', sets:[{weight:60,reps:10},{weight:62.5,reps:8}] },
@@ -1077,10 +1088,15 @@ Conseil COURT max 3 lignes, poids+reps exacts, format "➜ [conseil]", motivant.
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
+
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js', { scope: './' })
+        .catch(() => {});
+    });
   }
 </script>
+
 </body>
 </html>
